@@ -3,7 +3,7 @@ ProgramType PADDS
 OstrichWarmStart no
 
 BeginFilePairs
-step2_generate_HRU_tpl.py; model/step2_generate_HRU.py
+step2_generate_HRU.tpl.py; model/step2_generate_HRU.py
 EndFilePairs
 
 ObjectiveFunction 	GCOP
@@ -22,8 +22,8 @@ EndParams
 
 BeginResponseVars
   #name      filename                          keyword     line col  token
-  HRU_num      ROOT_DIR/CASE/Diagnostics.txt;  OST_NULL   1    1    ','
-  Sw_Rad_error        ROOT_DIR/CASE/Diagnostics.txt;  OST_NULL   1    2    ','
+  HRU_num      ROOT_DIR/Diagnostics.txt;  OST_NULL   1    1    ','
+  Sw_Rad_error        ROOT_DIR/Diagnostics.txt;  OST_NULL   1    2    ','
 EndResponseVars
 
 BeginGCOP

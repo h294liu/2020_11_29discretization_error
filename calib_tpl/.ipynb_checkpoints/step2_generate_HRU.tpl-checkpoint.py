@@ -89,20 +89,11 @@ def get_cdf_error(raw_df, dis_df, var_column, area_column):
 
 
 # ### 0. Specify file paths ###
-case = 'yampa'
-
 # --- common source file paths ---
-root_dir = '/glade/u/home/hongli/scratch/2020_11_29discretization_error/discretize'
-dem_raster = os.path.join(root_dir, 'source_data/MERIT_Hydro_dem_NLDAS.tif')
-dem_raster_prj = os.path.join(root_dir, 'source_data/MERIT_Hydro_dem_NLDAS_prj.tif')
-lc_raster = os.path.join(root_dir, 'source_data/nldas_landcover.tif') 
-lc_raster_prj = os.path.join(root_dir, 'source_data/nldas_landcover_prj.tif')
+root_dir = 'ROOT_DIR'
 
 # --- case study depedent file paths ----
-case_dir = os.path.join(root_dir, case)
-sub_shp = os.path.join(case_dir, 'huc12.shp')
-if not os.path.exists(case_dir):
-    os.makedirs(case_dir)
+case_dir = root_dir #os.path.join(root_dir, case)
 
 buf_dist = 600 # meter
     
@@ -126,12 +117,8 @@ lc_crop = os.path.join(case_dir, 'landcover_crop.tif')
 lc_crop_resample = os.path.join(case_dir, 'landcover_crop_resample.tif')
 lc_class_raster = os.path.join(case_dir, 'landcover_class.tif')
 
-sx_raster = os.path.join(case_dir, 'step7_merge_raw_Sx/sx.tif')
-sw_raster = os.path.join(case_dir, 'step9_merge_raw_Sw/sw.tif')
-sw_daily_dir = os.path.join(case_dir, 'step8_raw_Sw')
-sw_basename = 'sw_DOY' # e.g., sw_DOY100.tif
-first_day = 75   # March 15 (temperature >0)
-last_day = 167   # June 15 (snowpack disappears)
+sx_raster = os.path.join(case_dir, 'sx.tif')
+sw_raster = os.path.join(case_dir, 'sw.tif')
 
 sub_shp_prj = os.path.join(case_dir, 'subbasin_prj.shp')
 sub_shp_prj_buf = os.path.join(case_dir, 'subbasin_prj_buf.shp')
@@ -149,8 +136,8 @@ hru_attrb_sw_mean = os.path.join(case_dir, 'hru_attrb_sw_mean.tif')
 hru_attrb_sw_basename = os.path.join(case_dir, 'hru_attrb_sw_DOY') # e.g., hru_attrb_sw_DOY100.tif
 
 error_file = os.path.join(case_dir, 'Diagnostics.txt')
-hist_ofile = os.path.join(case_dir, 'plot/Sw_histgram.png')
-cdf_ofile = os.path.join(case_dir, 'plot/Sw_cdf.png')
+hist_ofile = os.path.join(case_dir, 'Sw_hist.png')
+cdf_ofile = os.path.join(case_dir, 'Sw_cdf.png')
 
 # -- define GRU and HRU field names and data types --
 subNo_field = 'GRUNo'
@@ -171,13 +158,15 @@ nodatavalue = -9999
 refraster = dem_crop # reference raster to rasterize vector and resample
 
 print('PART 1. classify slope raster')
-slp_classes = 6
-bins = [0,10,20,30,40,50,60] # including the rightmost edge
+bins = [0,slp_thrsh1_value,slp_thrsh2_value,slp_thrsh3_value,90] # including the rightmost edge
+bins.sort()
+slp_classes = len(bins)-1
 gs.classify_elevation(slp_crop, sub_raster, bins, slp_class_raster, slp_value_raster, nodatavalue)
 
 print('PART 2. classify aspect raster')
-asp_classes = 7
-bins = [-1,0,30,60,90,120,150,181] # including the rightmost edge
+bins = [-1,0,asp_thrsh1_value,asp_thrsh2_value,asp_thrsh3_value,181]
+bins.sort()
+asp_classes = len(bins)-1
 gs.classify_elevation(asp_crop_180, sub_raster, bins, asp_class_raster, asp_value_raster, nodatavalue)
 
 print('PART 3. genearte HRU')
@@ -186,7 +175,7 @@ raster_fieldname_list = [subNo_field, 'elevClass', 'lcClass', 'slpClass', 'aspCl
 
 gs.define_hru(raster_list, raster_fieldname_list, sub_raster, sub_corr_txt, subNo_field, subName_field,
               nodatavalue, hru_raster, hru_vector, hruNo_field, hruNo_field_type, hruName_field)
-gs.plot_vector(hru_vector, hruName_field) # plot for check
+# gs.plot_vector(hru_vector, hruName_field) # plot for check
 
 print('PART 4. zonal area')
 in_gpd = gpd.read_file(hru_vector)
@@ -216,6 +205,52 @@ f.write('%d, ' % len(dis_df_sw))
 f.write('%.6f, ' % sw_error)
 f.write('%.6f, ' % sw_cdf_dif_max)
 f.close()
+
+# print('PART 7. Plot CDFs')
+# # Choose how many bins you want here
+# num_bins = 100
+
+# # raw sw and its area-based cdf
+# with rio.open(sw_raster) as ff:
+#     sw  = ff.read(1)
+#     sw_mask = ff.read_masks(1)
+# origin_counts, origin_bin_edges = np.histogram(sw[sw_mask!=0], bins=num_bins)
+
+# cum_counts = np.cumsum(origin_counts)
+# total_count = cum_counts[-1]
+# origin_cdf = cum_counts/float(total_count)
+
+# # discretized sw and its area-based cdf
+# with rio.open(hru_attrb_sw_mean) as ff:
+#     dis_sw  = ff.read(1)
+#     dis_sw_mask = ff.read_masks(1)
+# dis_counts, dis_bin_edges = np.histogram(dis_sw[dis_sw_mask!=0], bins=num_bins)
+
+# cum_counts = np.cumsum(dis_counts)
+# total_count = cum_counts[-1]
+# dis_cdf = cum_counts/float(total_count)
+
+# # Plot comparatives histogram
+# fig, ax = plt.subplots(figsize=(9, 9*0.75))
+# ax.hist(sw[sw_mask!=0], bins=num_bins, alpha=0.6, label='Original')
+# ax.hist(dis_sw[dis_sw_mask!=0], bins=num_bins, alpha=0.6, label='Discretized')
+# plt.legend(loc='best')
+# plt.show()
+# ax.set_xlabel('Radiation [W$^2$/m]')
+# ax.set_ylabel('Frequency')
+# ax.legend(loc='best', framealpha=0.6, facecolor=None)
+# fig.savefig(hist_ofile,dpi=150)    
+
+# # Plot comparatives cdf
+# fig, ax = plt.subplots(figsize=(9, 9*0.75))
+# ax.plot(origin_bin_edges[1:], origin_cdf, '-k', label='Original')
+# ax.plot(dis_bin_edges[1:], origin_cdf, '--r', label='Discretized')
+# plt.legend(loc='best')
+# plt.show()
+# ax.set_xlabel('Radiation [W$^2$/m]')
+# ax.set_ylabel('CDF')
+# ax.legend(loc='best', framealpha=0.6, facecolor=None)
+# fig.savefig(cdf_ofile,dpi=150)   
 
 print('Done')
 

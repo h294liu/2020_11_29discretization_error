@@ -22,6 +22,7 @@ import fiona.crs
 import rasterio.mask
 import pandas as pd
 from scipy import stats
+from tqdm import tqdm
 import matplotlib.pyplot as plt 
 
 def reproject_raster(inraster, outraster, dst_crs):
@@ -514,7 +515,7 @@ def define_hru(raster_list, raster_fieldname_list, basin_raster, sub_corr_txt, s
 
         # (a) add new field columns, define other needed variables.
         if irow == 0:
-            hru_gpd_disv[hruName_field] = ""      # simplified HRU name, e.g., hruNo + HRU#.
+            hru_gpd_disv[hruName_field] = ""    # simplified HRU name, e.g., hruNo + HRU#.
             hru_gpd_disv[subName_field] = ""    # HUC12 int
             for jfield, field in enumerate(raster_fieldname_list): # other fields
                 hru_gpd_disv[field] = ""          
@@ -552,6 +553,137 @@ def define_hru(raster_list, raster_fieldname_list, basin_raster, sub_corr_txt, s
     
     # save gpd to shapefile
     hru_gpd_disv.to_file(outvector, index=False)
+    return
+
+def eliminate_small_hrus_dominant(hru_vector, hru_area_thld, subNo_field, subName_field, hruNo_field, hruNo_field_type, hruName_field,
+                                  area_field, raster_fieldname_list, refraster, hru_vector_diss, hru_raster_diss,nodatavalue):
+    # method 1. replace small HRU attibutes with the most dominant HRU's
+    in_gpd = gpd.read_file(hru_vector)
+    in_gpd_diss = in_gpd.copy()
+
+    # PART 1. eliminate small HRUs based on HRU area threshold
+    subs = np.unique(in_gpd_diss[subNo_field].values)
+    pbar = tqdm(total=len(subs))
+    for sub in subs:
+        in_gpd_diss[in_gpd_diss[subNo_field]==sub][area_field]
+        max_index = in_gpd_diss[in_gpd_diss[subNo_field]==sub][area_field].argmax()
+        flt1 = (in_gpd_diss[subNo_field]==sub)                 # filter 1: subbasin
+        flt2 = (in_gpd_diss[area_field]<=hru_area_thld)             # filter 2: HRU area    
+        flt = (flt1 & flt2)
+        # change attributes to the most dominant one's
+        in_gpd_diss.at[flt,hruName_field]=in_gpd_diss.loc[max_index,hruName_field]
+        for field in raster_fieldname_list:
+            in_gpd_diss.at[flt,field]=in_gpd_diss.loc[max_index,field]
+        pbar.update(1)
+    pbar.close()
+
+    in_gpd_diss = in_gpd_diss.dissolve(by=hruName_field)
+    in_gpd_diss = in_gpd_diss.reset_index() 
+    in_gpd_diss[area_field] = in_gpd_diss.area       
+
+    # PART 2. update HRUId and HRUNo based on elimination result
+    # identify the max number of HRUs among all subs and its integer length
+    max_hru_num = [len(in_gpd_diss[in_gpd_diss[subNo_field]==sub]) for sub in subs]
+    max_hru_str_len = len(str(max(max_hru_num))) 
+    # loop through HRU to update HRUNo and HRUId
+    for irow, row in in_gpd_diss.iterrows():
+        target_sub = in_gpd_diss.loc[irow,subNo_field]
+        cum_df = in_gpd_diss[0:irow+1]
+        hru_num = len(cum_df[cum_df[subNo_field]==target_sub])
+        hru_num_str = str(hru_num).zfill(max_hru_str_len)
+
+        in_gpd_diss.at[irow,hruNo_field]=hru_num    
+        in_gpd_diss.at[irow,hruName_field]=in_gpd_diss.loc[irow,subName_field]+hru_num_str
+
+    in_gpd_diss.to_file(hru_vector_diss)
+
+    # PART 3. convert hru_vector_diss to raster for zonal statistics
+    rasterize_vector(hru_vector_diss,hruNo_field,hruNo_field_type,refraster,hru_raster_diss,nodatavalue)
+    return
+
+def eliminate_small_hrus_neighbor(hru_vector, hru_area_thld, subNo_field, subName_field, hruNo_field, hruNo_field_type, hruName_field, 
+                                  area_field, raster_fieldname_list, refraster, hru_vector_diss, hru_raster_diss,nodatavalue):
+
+    # method 2: change HRU attribute to its' largest neighbor's HRU
+    in_gpd = gpd.read_file(hru_vector)
+    in_gpd_diss = in_gpd.copy()
+
+    # PART 1. eliminate small HRUs based on HRU area threshold
+    subs = np.unique(in_gpd_diss[subNo_field].values)
+    pbar = tqdm(total=len(subs))
+    for sub in subs:
+        flt1 = (in_gpd_diss[subNo_field]==sub)                 # filter 1: subbasin
+        flt2 = (in_gpd_diss[area_field]<=hru_area_thld)             # filter 2: HRU area    
+        sub_df = in_gpd_diss[flt1]                             # subbasin dataframe
+        elim_df = in_gpd_diss[flt1 & flt2]                     # to-be eliminated HRU dataframe    
+        dom_hru_idx = sub_df[area_field].idxmax()            # the most dominate HRU index among sub_df
+        dom_hru = sub_df.loc[dom_hru_idx,hruName_field]      # the most dominate HRU attribute among sub_df
+
+        row_num = len(sub_df)                                  # total number of HRUs within the subbasin
+        elim_num = len(elim_df)                                # number of to-be eliminated HRUs
+        iter_num = 0                                           # elimination iteration number 
+
+        # elimination
+        while row_num>1 and elim_num != 0 and iter_num<10:
+#             print(('Sub=%s, Iteration=%d, Target=%d/%d HRUs.')%(sub,iter_num+1,elim_num,row_num))
+
+            for irow, row in elim_df.iterrows():
+                # identify the target HRU's name and its neighbours' index in sub_df
+                target_hruName = elim_df.loc[irow,hruName_field]
+                nbhds_idx = sub_df[sub_df.geometry.touches(row['geometry'])].index.tolist() 
+
+                # update hruName_field depending on its neighbors
+                if len(nbhds_idx)>0:
+                    # when there are neightbors, take the attribute of the neighboring HRU which has the largest area.
+                    larg_nbhd_idx= sub_df.loc[nbhds_idx,area_field].idxmax()
+                    in_gpd_diss.at[in_gpd_diss[hruName_field]==target_hruName,hruName_field] = sub_df.loc[larg_nbhd_idx,hruName_field] 
+                    for field in raster_fieldname_list:
+                        in_gpd_diss.at[in_gpd_diss[hruName_field]==target_hruName,field]=sub_df.loc[larg_nbhd_idx,field]
+                else:
+                    # when there is no neightbor, take the attribute of the most dominant HRU within the subbasin. 
+                    print('no neighbors')
+                    in_gpd_diss.at[in_gpd_diss[hruName_field]==target_hruName,hruName_field] = dom_hru 
+                    for field in raster_fieldname_list:
+                        in_gpd_diss.at[in_gpd_diss[hruName_field]==target_hruName,field]=sub_df.loc[dom_hru_idx,field]
+
+            # dissolve in_gpd_diss based on hruName_field column and change hruName_field from index to column
+            in_gpd_diss = in_gpd_diss.dissolve(by=hruName_field)
+            in_gpd_diss = in_gpd_diss.reset_index() 
+
+            # update HRU area and filters
+            in_gpd_diss[area_field] = in_gpd_diss.area       
+            flt1 = (in_gpd_diss[subNo_field]==sub) 
+            flt2 = (in_gpd_diss[area_field]<=hru_area_thld)
+            sub_df = in_gpd_diss[flt1]
+            elim_df = in_gpd_diss[flt1 & flt2] 
+            dom_hru_idx = sub_df[area_field].idxmax()   
+            dom_hru = sub_df.loc[dom_hru_idx,hruName_field] 
+
+            # udpdate counts
+            row_num = len(sub_df) 
+            elim_num = len(elim_df) 
+            iter_num = iter_num+1 
+        pbar.update(1)
+    pbar.close()
+
+    # PART 2. update HRUId and HRUNo based on elimination result
+    # identify the max number of HRUs among all subs and its integer length
+    max_hru_num = [len(in_gpd_diss[in_gpd_diss[subNo_field]==sub]) for sub in subs]
+    max_hru_str_len = len(str(max(max_hru_num))) 
+    # loop through HRU to update HRUNo and HRUId
+    for irow, row in in_gpd_diss.iterrows():
+        target_sub = in_gpd_diss.loc[irow,subNo_field]
+        cum_df = in_gpd_diss[0:irow+1]
+        hru_num = len(cum_df[cum_df[subNo_field]==target_sub])
+        hru_num_str = str(hru_num).zfill(max_hru_str_len)
+
+        in_gpd_diss.at[irow,hruNo_field]=hru_num    
+        in_gpd_diss.at[irow,hruName_field]=in_gpd_diss.loc[irow,subName_field]+hru_num_str
+
+    in_gpd_diss.to_file(hru_vector_diss)
+
+    # PART 3. convert hru_vector_diss to raster for zonal statistics
+    rasterize_vector(hru_vector_diss,hruNo_field,hruNo_field_type,refraster,hru_raster_diss,nodatavalue)
     return
 
 def zonal_statistic(attr_raster, invector, infield, infield_dtype, refraster, metric, out_raster, nodatavalue, *args, **kwargs):
@@ -604,6 +736,10 @@ def zonal_statistic(attr_raster, invector, infield, infield_dtype, refraster, me
             output_array[smask] = zonal_value
         else: 
             print("Invalid metric string. Please choose from 'mean', 'median', 'max', 'min'.")
+    
+    # change astype as the same as attr_raster dtype
+    in_gpd[output_column_prefix].astype=out_meta['dtype']
+    output_array=output_array.astype(out_meta['dtype'])
     
     # save vector
     in_gpd.to_file(invector)
