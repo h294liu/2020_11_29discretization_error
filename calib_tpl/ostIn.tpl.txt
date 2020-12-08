@@ -3,7 +3,7 @@ ProgramType PADDS
 OstrichWarmStart no
 
 BeginFilePairs
-step2_generate_HRU.tpl.py; model/step2_generate_HRU.py
+DISCRETIZE_CODE_TPL; model/DISCRETIZE_CODE
 EndFilePairs
 
 ObjectiveFunction 	GCOP

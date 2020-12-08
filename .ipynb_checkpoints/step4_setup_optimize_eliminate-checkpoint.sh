@@ -8,8 +8,8 @@ set -e
 source_code_dir=/glade/u/home/hongli/github/2020_11_29discretization_error
 ostIn_tpl_path=$source_code_dir/calib_tpl/ostIn.tpl.txt
 run_model_tpl_path=$source_code_dir/calib_tpl/run_model.tpl.sh
-dis_code_tpl_path=$source_code_dir/calib_tpl/step2_generate_HRU.tpl.py
-# dis_code_tpl_path=$source_code_dir/calib_tpl/step2_generate_HRU_eliminate.tpl.py
+# dis_code_tpl_path=$source_code_dir/calib_tpl/step2_generate_HRU.tpl.py
+dis_code_tpl_path=$source_code_dir/calib_tpl/step2_generate_HRU_eliminate.tpl.py
 dis_functions=$source_code_dir/geospatial_functions
 
 case=yampa
@@ -24,15 +24,15 @@ sub_raster=$source_data_dir/subbasin.tif
 sub_corr_txt=$source_data_dir/subNo_HUC12_corr.txt
 
 Ostrich_exe=/glade/u/home/hongli/tools/ostrich/OstrichGCC
-MaxIterations=5000
+MaxIterations=2500
 opt_num=3
 
 for i in $(seq 1 $opt_num); do
 
     echo $i
 
-    optimize_dir=/glade/u/home/hongli/scratch/2020_11_29discretization_error/${case}_optimize${i}
-    # optimize_dir=/glade/u/home/hongli/scratch/2020_11_29discretization_error/${case}_optimize_eliminate
+#     optimize_dir=/glade/u/home/hongli/scratch/2020_11_29discretization_error/${case}_optimize${i}
+    optimize_dir=/glade/u/home/hongli/scratch/2020_11_29discretization_error/${case}_optimize_eliminate${i}
     if [ -d $optimize_dir ]; then rm -rf $optimize_dir; fi
     mkdir -p $optimize_dir
     model_dir=${optimize_dir}/model

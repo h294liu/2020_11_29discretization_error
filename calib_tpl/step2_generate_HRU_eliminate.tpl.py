@@ -184,11 +184,18 @@ in_gpd = gpd.read_file(hru_vector)
 in_gpd[area_field] = in_gpd.area
 in_gpd.to_file(hru_vector)
 
-print('PART 5. Sw zonal statistics')
-gs.zonal_statistic(sw_raster, hru_vector, hruNo_field, hruNo_field_type, refraster, 'mean', 
+print('PART 5. eliminate small HRUs')
+# method 2: change HRU attribute to its' largest neighbor's HRU
+raster_fieldname_list = [subNo_field, 'elevClass', 'lcClass', 'slpClass', 'aspClass']
+gs.eliminate_small_hrus_neighbor(hru_vector, hru_area_thld, subNo_field, subName_field, hruNo_field,
+                                 hruNo_field_type, hruName_field, area_field, raster_fieldname_list,
+                                 refraster, hru_vector_diss, hru_raster_diss,nodatavalue)
+
+print('PART 6. Sw zonal statistics')
+gs.zonal_statistic(sw_raster, hru_vector_diss, hruNo_field, hruNo_field_type, refraster, 'mean', 
                    hru_attrb_sw_mean, nodatavalue, output_column_prefix='sw')
 
-print('PART 6. Calculate errors')
+print('PART 7. Calculate errors')
 sw_var = 'Sw'
 sx_var = 'Sx'
 area_var = 'area_m'
@@ -206,7 +213,7 @@ f.write('HRU_number, Sw_error, SW_cdf_dif_max\n')
 f.write('%d, ' % len(dis_df_sw))
 f.write('%.6f, ' % sw_error)
 f.write('%.6f, ' % sw_cdf_dif_max)
-f.close() 
+f.close()
 
 print('Done')
 

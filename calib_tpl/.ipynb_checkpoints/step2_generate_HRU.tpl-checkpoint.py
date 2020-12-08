@@ -6,16 +6,11 @@ Created on Fri Oct 16 09:35:11 2020
 """
 
 # ### 0. Import libraries ###
-import os, fiona
+import os
 import numpy as np
 import rasterio as rio
-from rasterio.warp import calculate_default_transform, reproject, Resampling
 import geopandas as gpd
-import fiona.crs 
-import rasterio.mask
 import pandas as pd
-from scipy import stats
-import skimage.transform as st
 import matplotlib.pyplot as plt 
 import geospatial_functions.geospatial as gs
 
@@ -127,6 +122,8 @@ sub_corr_txt=os.path.join(case_dir, 'subNo_HUC12_corr.txt') #correspondence betw
  
 hru_raster = os.path.join(case_dir, 'hru.tif')
 hru_vector = os.path.join(case_dir, 'hru.shp')
+hru_raster_diss = os.path.join(case_dir, 'hru_diss.tif')
+hru_vector_diss = os.path.join(case_dir, 'hru_diss.shp')
 
 hru_attrb_elev = os.path.join(case_dir, 'hru_attrb_elevation.tif') # attribute raster of HRU
 hru_attrb_lc = os.path.join(case_dir, 'hru_attrb_landcover.tif')
@@ -141,12 +138,14 @@ cdf_ofile = os.path.join(case_dir, 'Sw_cdf.png')
 
 # -- define GRU and HRU field names and data types --
 subNo_field = 'GRUNo'
-attrb_field_type = 'int32'
+subNo_field_type = 'int32'
 subName_field = 'GRUId'
 
 hruNo_field = 'HRUNo'
 hruNo_field_type = 'int32'
 hruName_field = 'HRUId'
+
+area_field = 'areaSqm'
 
 # --- define common projection, nodata value, reference raster----
 proj4="+proj=aea +lat_1=20 +lat_2=60 +lat_0=40 +lon_0=-96 +x_0=0 +y_0=0 +ellps=GRS80 +datum=NAD83 +units=m no_defs"
@@ -156,6 +155,10 @@ dst_crs = rio.crs.CRS.from_string(proj4)
 ## reference 2: https://epsg.io/102008
 nodatavalue = -9999  
 refraster = dem_crop # reference raster to rasterize vector and resample
+
+# HRU elimination threshold
+hru_area_thld = 10**6 #1km2
+
 
 print('PART 1. classify slope raster')
 bins = [0,slp_thrsh1_value,slp_thrsh2_value,slp_thrsh3_value,90] # including the rightmost edge
@@ -175,16 +178,15 @@ raster_fieldname_list = [subNo_field, 'elevClass', 'lcClass', 'slpClass', 'aspCl
 
 gs.define_hru(raster_list, raster_fieldname_list, sub_raster, sub_corr_txt, subNo_field, subName_field,
               nodatavalue, hru_raster, hru_vector, hruNo_field, hruNo_field_type, hruName_field)
-# gs.plot_vector(hru_vector, hruName_field) # plot for check
 
 print('PART 4. zonal area')
 in_gpd = gpd.read_file(hru_vector)
-in_gpd['areaSqm'] = in_gpd.area
+in_gpd[area_field] = in_gpd.area
 in_gpd.to_file(hru_vector)
 
 print('PART 5. Sw zonal statistics')
-gs.zonal_statistic(sw_raster, hru_vector, hruNo_field, hruNo_field_type, refraster, 'mean', hru_attrb_sw_mean,
-                   nodatavalue, output_column_prefix='sw')
+gs.zonal_statistic(sw_raster, hru_vector, hruNo_field, hruNo_field_type, refraster, 'mean', 
+                   hru_attrb_sw_mean, nodatavalue, output_column_prefix='sw')
 
 print('PART 6. Calculate errors')
 sw_var = 'Sw'
@@ -204,53 +206,7 @@ f.write('HRU_number, Sw_error, SW_cdf_dif_max\n')
 f.write('%d, ' % len(dis_df_sw))
 f.write('%.6f, ' % sw_error)
 f.write('%.6f, ' % sw_cdf_dif_max)
-f.close()
-
-# print('PART 7. Plot CDFs')
-# # Choose how many bins you want here
-# num_bins = 100
-
-# # raw sw and its area-based cdf
-# with rio.open(sw_raster) as ff:
-#     sw  = ff.read(1)
-#     sw_mask = ff.read_masks(1)
-# origin_counts, origin_bin_edges = np.histogram(sw[sw_mask!=0], bins=num_bins)
-
-# cum_counts = np.cumsum(origin_counts)
-# total_count = cum_counts[-1]
-# origin_cdf = cum_counts/float(total_count)
-
-# # discretized sw and its area-based cdf
-# with rio.open(hru_attrb_sw_mean) as ff:
-#     dis_sw  = ff.read(1)
-#     dis_sw_mask = ff.read_masks(1)
-# dis_counts, dis_bin_edges = np.histogram(dis_sw[dis_sw_mask!=0], bins=num_bins)
-
-# cum_counts = np.cumsum(dis_counts)
-# total_count = cum_counts[-1]
-# dis_cdf = cum_counts/float(total_count)
-
-# # Plot comparatives histogram
-# fig, ax = plt.subplots(figsize=(9, 9*0.75))
-# ax.hist(sw[sw_mask!=0], bins=num_bins, alpha=0.6, label='Original')
-# ax.hist(dis_sw[dis_sw_mask!=0], bins=num_bins, alpha=0.6, label='Discretized')
-# plt.legend(loc='best')
-# plt.show()
-# ax.set_xlabel('Radiation [W$^2$/m]')
-# ax.set_ylabel('Frequency')
-# ax.legend(loc='best', framealpha=0.6, facecolor=None)
-# fig.savefig(hist_ofile,dpi=150)    
-
-# # Plot comparatives cdf
-# fig, ax = plt.subplots(figsize=(9, 9*0.75))
-# ax.plot(origin_bin_edges[1:], origin_cdf, '-k', label='Original')
-# ax.plot(dis_bin_edges[1:], origin_cdf, '--r', label='Discretized')
-# plt.legend(loc='best')
-# plt.show()
-# ax.set_xlabel('Radiation [W$^2$/m]')
-# ax.set_ylabel('CDF')
-# ax.legend(loc='best', framealpha=0.6, facecolor=None)
-# fig.savefig(cdf_ofile,dpi=150)   
+f.close() 
 
 print('Done')
 

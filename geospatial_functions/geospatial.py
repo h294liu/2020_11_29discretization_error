@@ -299,6 +299,33 @@ def resample_raster(inraster,refraster,outraster):
     # reference: https://gis.stackexchange.com/questions/271226/up-sampling-increasing-resolution-raster-image-using-gdal
     return
 
+def resample_raster_scale(inraster,scale_factor,outraster,nodatavalue):
+    with rio.open(inraster) as dataset:
+
+        # resample data to target shape
+        data = dataset.read(
+            out_shape=(dataset.count,
+                       int(dataset.height * scale_factor),
+                       int(dataset.width * scale_factor)),
+            resampling=Resampling.bilinear)
+
+        # scale image transform
+        transform = dataset.transform * dataset.transform.scale(
+            (dataset.width / data.shape[-1]),
+            (dataset.height / data.shape[-2]))
+
+        # write resampled raster data
+        out_meta = dataset.meta.copy()
+        out_meta.update(transform=transform, driver='GTiff', 
+                        height=int(dataset.height * scale_factor),
+                        width=int(dataset.width * scale_factor))
+
+        with rio.open(outraster, 'w', **out_meta) as outf:
+            out_arr_ma = np.ma.masked_array(data, data==nodatavalue)
+            outf.write(out_arr_ma) 
+        return
+    
+    
 def classify_elevation(dem_raster, base_raster, bins, dem_class_raster, dem_value_raster, nodatavalue):
     '''
     base_raster: input, raster, base as mask to classify elevation per base unit.
